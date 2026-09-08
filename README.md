@@ -1,8 +1,10 @@
+<p align="center"><img src="docs/icon.png" width="128" alt="LoginToggle icon"></p>
+
 # LoginToggle
 
 One button to turn off every app that opens at login on macOS — and one click to turn it all back on.
 
-No Apple Developer account. No background daemon. A 150-line SwiftUI menu bar app plus two shell scripts.
+No background daemon. A 150-line SwiftUI menu bar app plus two shell scripts.
 
 ## Give this to your agent
 
@@ -12,9 +14,9 @@ Copy the block below into Claude Code, Cursor, Codex, or any agent with shell ac
 Install LoginToggle (https://github.com/kartikkabadi/login-toggle) on this Mac:
 
 1. git clone https://github.com/kartikkabadi/login-toggle into a temp directory, then cd into it.
-2. Run ./install.sh. It builds the app with Swift Package Manager (no Apple Developer
-   account needed), installs LoginToggle.app into ~/Applications, and installs two
-   CLI scripts, login-off and login-on, into ~/.local/bin.
+2. Run ./install.sh. It builds the app with Swift Package Manager, installs
+   LoginToggle.app into ~/Applications, and installs two CLI scripts,
+   login-off and login-on, into ~/.local/bin.
 3. If `swift` is not found, run `xcode-select --install` first, wait for it to finish,
    then run ./install.sh again.
 4. Verify: `pgrep -fl LoginToggle` shows a process, and a power icon appears in the
