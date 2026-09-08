@@ -129,7 +129,7 @@ final class Model: ObservableObject {
             guard parts.count == 2 else { continue }
             let n = pctDecode(String(parts[0]))
             let p = pctDecode(String(parts[1]))
-            guard p != "missing value", hasVisibleName(n) else { continue }
+            guard n != "missing value", hasVisibleName(n) else { continue }
             liveNames.insert(n)
             rows.append(Row(id: "li-\(idx)-\(p)", name: n, detail: p == "-" ? "" : p, isAgent: false, on: true, canEnable: true))
         }
