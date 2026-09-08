@@ -42,21 +42,25 @@ func runAppleScript(_ source: String, _ args: [String] = []) -> String {
 }
 
 private let enumerateScript = """
-on scrub(t)
+on enc(t)
+	set AppleScript's text item delimiters to "%"
+	set parts to text items of t
+	set AppleScript's text item delimiters to "%25"
+	set t to parts as text
 	set AppleScript's text item delimiters to tab
 	set parts to text items of t
-	set AppleScript's text item delimiters to " "
+	set AppleScript's text item delimiters to "%09"
 	set t to parts as text
 	set AppleScript's text item delimiters to return
 	set parts to text items of t
-	set AppleScript's text item delimiters to " "
+	set AppleScript's text item delimiters to "%0D"
 	set t to parts as text
 	set AppleScript's text item delimiters to linefeed
 	set parts to text items of t
-	set AppleScript's text item delimiters to " "
+	set AppleScript's text item delimiters to "%0A"
 	set t to parts as text
 	return t
-end scrub
+end enc
 
 tell application "System Events"
 	set lis to every login item
@@ -65,11 +69,16 @@ tell application "System Events"
 	repeat with li in lis
 		set p to path of li
 		if p is missing value then set p to "-"
-		set acc to acc & (my scrub(name of li)) & (ASCII character 9) & (my scrub(p)) & linefeed
+		set acc to acc & (my enc(name of li)) & (ASCII character 9) & (my enc(p)) & linefeed
 	end repeat
 	return acc
 end tell
 """
+
+// Decodes the percent-encoding produced by the AppleScript enc handler.
+private func pctDecode(_ s: String) -> String {
+    s.removingPercentEncoding ?? s
+}
 
 struct Row: Identifiable {
     let id: String
@@ -118,9 +127,9 @@ final class Model: ObservableObject {
         for (idx, line) in tsv.split(separator: "\n").enumerated() {
             let parts = line.split(separator: "\t", omittingEmptySubsequences: false)
             guard parts.count == 2 else { continue }
-            let n = String(parts[0])
-            let p = String(parts[1]) == "missing value" ? "-" : String(parts[1])
-            guard n != "missing value", hasVisibleName(n) else { continue }
+            let n = pctDecode(String(parts[0]))
+            let p = pctDecode(String(parts[1]))
+            guard p != "missing value", hasVisibleName(n) else { continue }
             liveNames.insert(n)
             rows.append(Row(id: "li-\(idx)-\(p)", name: n, detail: p == "-" ? "" : p, isAgent: false, on: true, canEnable: true))
         }

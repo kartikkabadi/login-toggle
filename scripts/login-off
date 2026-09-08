@@ -13,21 +13,45 @@ TMP_SUFFIX=".$$.tmp"
 # atomically, then delete only the captured paths. AppleScript returns data and
 # receives paths as arguments — nothing is interpolated into script source.
 collect=$(osascript <<'EOF'
-on scrub(t)
+on enc(t)
+	set AppleScript's text item delimiters to "%"
+	set parts to text items of t
+	set AppleScript's text item delimiters to "%25"
+	set t to parts as text
 	set AppleScript's text item delimiters to tab
 	set parts to text items of t
-	set AppleScript's text item delimiters to " "
+	set AppleScript's text item delimiters to "%09"
 	set t to parts as text
 	set AppleScript's text item delimiters to return
 	set parts to text items of t
-	set AppleScript's text item delimiters to " "
+	set AppleScript's text item delimiters to "%0D"
 	set t to parts as text
 	set AppleScript's text item delimiters to linefeed
 	set parts to text items of t
-	set AppleScript's text item delimiters to " "
+	set AppleScript's text item delimiters to "%0A"
 	set t to parts as text
 	return t
-end scrub
+end enc
+
+on dec(t)
+	set AppleScript's text item delimiters to "%0A"
+	set parts to text items of t
+	set AppleScript's text item delimiters to linefeed
+	set t to parts as text
+	set AppleScript's text item delimiters to "%0D"
+	set parts to text items of t
+	set AppleScript's text item delimiters to return
+	set t to parts as text
+	set AppleScript's text item delimiters to "%09"
+	set parts to text items of t
+	set AppleScript's text item delimiters to tab
+	set t to parts as text
+	set AppleScript's text item delimiters to "%25"
+	set parts to text items of t
+	set AppleScript's text item delimiters to "%"
+	set t to parts as text
+	return t
+end dec
 
 tell application "System Events"
 	set lis to every login item
@@ -36,7 +60,7 @@ tell application "System Events"
 	repeat with li in lis
 		set p to path of li
 		if p is missing value then set p to "-"
-		set acc to acc & (my scrub(name of li)) & (ASCII character 9) & (my scrub(p)) & linefeed
+		set acc to acc & (my enc(name of li)) & (ASCII character 9) & (my enc(p)) & linefeed
 	end repeat
 	return acc
 end tell
