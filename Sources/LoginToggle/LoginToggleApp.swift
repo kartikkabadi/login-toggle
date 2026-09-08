@@ -126,6 +126,14 @@ final class Model: ObservableObject {
         }
     }
 
+    func update() {
+        busy = true
+        DispatchQueue.global().async {
+            _ = runCmd("/bin/bash", ["-c", "tmp=$(mktemp -d) && git clone --depth 1 https://github.com/kartikkabadi/login-toggle \"$tmp\" && bash \"$tmp/install.sh\"; rm -rf \"$tmp\""])
+            DispatchQueue.main.async { self.busy = false }
+        }
+    }
+
     func turnOff() {
         busy = true
         DispatchQueue.global().async {
@@ -179,19 +187,25 @@ struct ContentView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Open at login").font(.headline)
-            if m.loginRows.isEmpty && m.agentRows.isEmpty {
-                Text("Nothing auto-starts. Enjoy the quiet.").foregroundStyle(.secondary)
-            }
-            ForEach(m.loginRows) { row in
-                RowView(row: row, m: m)
-            }
-            if !m.agentRows.isEmpty {
-                Text("Launch agents").font(.headline).padding(.top, 4)
-                ForEach(m.agentRows) { row in
-                    RowView(row: row, m: m)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Open at login").font(.headline)
+                    if m.loginRows.isEmpty && m.agentRows.isEmpty {
+                        Text("Nothing auto-starts. Enjoy the quiet.").foregroundStyle(.secondary)
+                    }
+                    ForEach(m.loginRows) { row in
+                        RowView(row: row, m: m)
+                    }
+                    if !m.agentRows.isEmpty {
+                        Text("Launch agents").font(.headline).padding(.top, 4)
+                        ForEach(m.agentRows) { row in
+                            RowView(row: row, m: m)
+                        }
+                    }
                 }
+                .padding(.horizontal, 2)
             }
+            .frame(maxHeight: 460)
             Divider()
             HStack {
                 Button("Turn all off") { m.turnOff() }
@@ -200,6 +214,8 @@ struct ContentView: View {
                 Button("Restore") { m.restore() }
                     .disabled(m.busy)
                 Spacer()
+                Button("Update") { m.update() }
+                    .disabled(m.busy)
                 Button("Refresh") { m.refresh() }
                 Button("Quit") { NSApplication.shared.terminate(nil) }
             }
@@ -217,7 +233,7 @@ struct ContentView: View {
 struct LoginToggleApp: App {
     @StateObject var m = Model()
     var body: some Scene {
-        MenuBarExtra("LoginToggle", systemImage: "power.dotted") {
+        MenuBarExtra("LoginToggle", systemImage: "power") {
             ContentView(m: m)
         }
         .menuBarExtraStyle(.window)

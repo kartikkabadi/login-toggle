@@ -42,6 +42,7 @@ Requirements: macOS 13+ and Xcode Command Line Tools (`xcode-select --install`).
 - **Turn all off** — saves the current state, then stops launch agents immediately and removes login items. Nothing auto-starts at your next login.
 - **Restore** — puts everything back and starts the agents again.
 - In a terminal: `login-off` and `login-on`.
+- **Update** — pulls the latest version from GitHub and reinstalls in place.
 
 ## What gets turned off
 
