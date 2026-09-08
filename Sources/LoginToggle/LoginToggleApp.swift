@@ -122,9 +122,31 @@ final class Model: ObservableObject {
                 }
             } else if row.on {
                 self.saveItem(row.name, row.detail.isEmpty ? "-" : row.detail)
-                _ = runCmd("/usr/bin/osascript", ["-e", "tell application \"System Events\" to delete (every login item whose name is \"\(row.name)\")"])
+                if row.detail.isEmpty {
+                    _ = runCmd("/usr/bin/osascript", [
+                        "-e", "on run argv",
+                        "-e", "set n to item 1 of argv",
+                        "-e", "tell application \"System Events\" to delete (every login item whose name is n)",
+                        "-e", "end run",
+                        row.name
+                    ])
+                } else {
+                    _ = runCmd("/usr/bin/osascript", [
+                        "-e", "on run argv",
+                        "-e", "set p to item 1 of argv",
+                        "-e", "tell application \"System Events\" to delete (every login item whose path is p)",
+                        "-e", "end run",
+                        row.detail
+                    ])
+                }
             } else if row.canEnable {
-                _ = runCmd("/usr/bin/osascript", ["-e", "tell application \"System Events\" to make login item at end with properties {path:\"\(row.detail)\", hidden:false}"])
+                _ = runCmd("/usr/bin/osascript", [
+                    "-e", "on run argv",
+                    "-e", "set p to item 1 of argv",
+                    "-e", "tell application \"System Events\" to make login item at end with properties {path:p, hidden:false}",
+                    "-e", "end run",
+                    row.detail
+                ])
                 self.forgetItem(row.name)
             }
             DispatchQueue.main.async {

@@ -2,15 +2,15 @@
 # login-off — one button to turn off every app that opens at login. Undo: login-on.
 # Covers: classic login items (System Events) + non-Apple launch agents with RunAtLoad/KeepAlive.
 # Not covered: macOS 13+ "Allow in Background" items (SMAppService) — no public API, see System Settings.
-set -u
+set -uo pipefail
 
 STATE="$HOME/.local/state/login-toggle"
 mkdir -p "$STATE"
 U=$(id -u)
 
-# 1) classic login items: collect, persist atomically, then delete.
-# AppleScript only returns data; all file I/O happens here in bash, and the
-# backup must be on disk before anything is deleted.
+# 1) classic login items: collect (read-only), merge into the backup, persist
+# atomically, then delete only the captured paths. AppleScript returns data and
+# receives paths as arguments — nothing is interpolated into script source.
 collect=$(osascript <<'EOF'
 tell application "System Events"
 	set lis to every login item
@@ -30,24 +30,58 @@ if [ -z "$collect" ]; then
 	echo "login items: none found (or Automation permission missing — check System Settings > Privacy > Automation)"
 else
 	tmp="$STATE/login-items.tsv.tmp"
+	merge_ok=yes
 	{
-		[ -f "$STATE/login-items.tsv" ] && cat "$STATE/login-items.tsv"
+		if [ -f "$STATE/login-items.tsv" ]; then
+			cat "$STATE/login-items.tsv" || merge_ok=no
+			[ "$merge_ok" = "yes" ] && [ -s "$STATE/login-items.tsv" ] && echo
+		fi
 		printf '%s\n' "$collect"
 	} | awk -F'\t' '!seen[$0]++' > "$tmp"
-	if [ -s "$tmp" ] && mv "$tmp" "$STATE/login-items.tsv"; then
-		deleted=0
-		while IFS=$'\t' read -r name path; do
-			[ -z "$path" ] || [ "$path" = "-" ] && continue
-			if osascript -e "tell application \"System Events\" to delete (every login item whose path is \"$path\")" >/dev/null 2>&1; then
-				deleted=$((deleted+1))
-			fi
-		done < "$STATE/login-items.tsv"
-		echo "login items: removed $deleted (saved to $STATE/login-items.tsv)"
-	else
-		echo "backup write failed — login items left untouched" >&2
+	if [ "$merge_ok" = "no" ] || [ ! -s "$tmp" ]; then
+		echo "backup merge failed — login items left untouched" >&2
 		rm -f "$tmp"
 		exit 1
 	fi
+	mv "$tmp" "$STATE/login-items.tsv"
+	deleted=0
+	failed=0
+	pathless=0
+	printf '%s\n' "$collect" > "$STATE/.collect.tmp"
+	while IFS= read -r line; do
+		[ -z "$line" ] && continue
+		name=${line%%	*}
+		path=${line#*	}
+		[ "$path" = "$line" ] && path=""
+		if [ -z "$path" ] || [ "$path" = "-" ]; then
+			if osascript - "$name" <<'EOF' >/dev/null 2>&1
+on run argv
+	set n to item 1 of argv
+	tell application "System Events" to delete (every login item whose name is n)
+end run
+EOF
+			then
+				pathless=$((pathless+1))
+			else
+				failed=$((failed+1))
+			fi
+			continue
+		fi
+		if osascript - "$path" <<'EOF' >/dev/null 2>&1
+on run argv
+	set p to item 1 of argv
+	tell application "System Events" to delete (every login item whose path is p)
+end run
+EOF
+		then
+			deleted=$((deleted+1))
+		else
+			failed=$((failed+1))
+		fi
+	done < "$STATE/.collect.tmp"
+	rm -f "$STATE/.collect.tmp"
+	echo "login items: removed $deleted, pathless removed $pathless, failed $failed (backup at $STATE/login-items.tsv)"
+	[ $failed -eq 0 ] || echo "warning: $failed login item(s) could not be removed — they remain enabled" >&2
 fi
 
 # 2) launch agents that run at login: save labels, stop now, disable persistently

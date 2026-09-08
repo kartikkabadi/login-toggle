@@ -2,7 +2,7 @@
 # login-on — undo login-off: restore login items and re-enable launch agents.
 # Skips items that are already live (safe to re-run). Keeps the backup if
 # anything fails to restore, so a rerun can finish the job.
-set -u
+set -uo pipefail
 
 STATE="$HOME/.local/state/login-toggle"
 U=$(id -u)
@@ -12,10 +12,24 @@ if [ -f "$STATE/launch-agents.txt" ]; then
 	f=0
 	while IFS= read -r label; do
 		[ -z "$label" ] && continue
-		launchctl enable "gui/$U/$label" 2>/dev/null && n=$((n+1)) || f=$((f+1))
+		launchctl enable "gui/$U/$label" 2>/dev/null
+		ok=yes
+		booted=no
 		for d in "$HOME/Library/LaunchAgents" "/Library/LaunchAgents"; do
-			[ -e "$d/$label.plist" ] && launchctl bootstrap "gui/$U" "$d/$label.plist" 2>/dev/null
+			[ -e "$d/$label.plist" ] || continue
+			if launchctl bootstrap "gui/$U" "$d/$label.plist" 2>/dev/null; then
+				booted=yes
+			elif launchctl print "gui/$U/$label" >/dev/null 2>&1; then
+				booted=yes
+			else
+				ok=no
+			fi
 		done
+		if [ "$ok" = "yes" ] && [ "$booted" = "yes" ]; then
+			n=$((n+1))
+		else
+			f=$((f+1))
+		fi
 	done < "$STATE/launch-agents.txt"
 	echo "launch agents re-enabled: $n (started now where possible)"
 	if [ $f -eq 0 ]; then
@@ -35,12 +49,24 @@ if [ -f "$STATE/login-items.tsv" ]; then
 			u=$((u+1))
 			continue
 		fi
-		exists=$(osascript -e "tell application \"System Events\" to exists login item whose path is \"$path\"" 2>/dev/null)
-		if [ "$exists" = "true" ]; then
+		exists=$(osascript - "$path" <<'EOF' 2>/dev/null
+on run argv
+	set p to item 1 of argv
+	tell application "System Events" to count (login items whose path is p)
+end run
+EOF
+)
+		if [ "${exists:-0}" -ge 1 ] 2>/dev/null; then
 			n=$((n+1))
 			continue
 		fi
-		if osascript -e "tell application \"System Events\" to make login item at end with properties {path:\"$path\", hidden:false}" >/dev/null 2>&1; then
+		if osascript - "$path" <<'EOF' >/dev/null 2>&1
+on run argv
+	set p to item 1 of argv
+	tell application "System Events" to make login item at end with properties {path:p, hidden:false}
+end run
+EOF
+		then
 			n=$((n+1))
 		else
 			f=$((f+1))
