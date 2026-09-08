@@ -2,9 +2,13 @@
 
 # LoginToggle
 
-One button to turn off every app that opens at login on macOS — and one click to turn it all back on.
+One menu bar button to turn off every app that opens at login on macOS — and one click to turn it all back on.
 
-No background daemon. A 150-line SwiftUI menu bar app plus two shell scripts.
+No background daemon. A small SwiftUI menu bar app plus two shell scripts. Everything stays on your machine.
+
+<p align="center"><img src="docs/screenshot.png" width="360" alt="LoginToggle menu"></p>
+
+![build](https://github.com/kartikkabadi/login-toggle/actions/workflows/build.yml/badge.svg)
 
 ## Give this to your agent
 
@@ -46,11 +50,14 @@ Requirements: macOS 13+ and Xcode Command Line Tools (`xcode-select --install`).
 
 ## Use it
 
-- Click the power icon in your menu bar. You get the full list: every login item and every launch agent that runs at login, each marked `on` or `off`.
-- **Turn all off** — saves the current state, then stops launch agents immediately and removes login items. Nothing auto-starts at your next login.
-- **Restore** — puts everything back and starts the agents again.
-- In a terminal: `login-off` and `login-on`.
+Click the power icon in your menu bar:
+
+- **Per-item switches** — flip any login item or launch agent off or on, one at a time. Off saves the item, then removes it from login; on brings back just that one.
+- **Turn all off** — saves state, stops every launch agent immediately, removes every login item. Nothing auto-starts at your next login.
+- **Restore** — brings everything back and starts the agents again.
 - **Update** — pulls the latest version from GitHub and reinstalls in place.
+
+In a terminal: `login-off` (everything off) and `login-on` (everything back).
 
 ## What gets turned off
 
@@ -66,11 +73,15 @@ Requirements: macOS 13+ and Xcode Command Line Tools (`xcode-select --install`).
 
 Everything is reversible. State is saved to `~/.local/state/login-toggle/` before anything is touched, so **Restore** / `login-on` works even after a reboot. Removing a login item only affects the next login; apps already open stay open.
 
+## Privacy
+
+No network access, no telemetry, no accounts. The only network call is the Update button pulling from this repo.
+
 ## Uninstall
 
 ```bash
 login-on            # restore everything first
-rm -rf ~/Applications/LoginToggle.app ~/.local/bin/login-off ~/.local/bin/login-on ~/.local/state/login-toggle
+rm -rf ~/Applications/LoginToggle.app ~/.local/bin/login-off ~/.local/bin/login-on ~/.local/state/login-toggle ~/.local/share/login-toggle
 ```
 
 ## How it works
