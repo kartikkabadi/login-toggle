@@ -13,6 +13,22 @@ TMP_SUFFIX=".$$.tmp"
 # atomically, then delete only the captured paths. AppleScript returns data and
 # receives paths as arguments — nothing is interpolated into script source.
 collect=$(osascript <<'EOF'
+on scrub(t)
+	set AppleScript's text item delimiters to tab
+	set parts to text items of t
+	set AppleScript's text item delimiters to " "
+	set t to parts as text
+	set AppleScript's text item delimiters to return
+	set parts to text items of t
+	set AppleScript's text item delimiters to " "
+	set t to parts as text
+	set AppleScript's text item delimiters to linefeed
+	set parts to text items of t
+	set AppleScript's text item delimiters to " "
+	set t to parts as text
+	return t
+end scrub
+
 tell application "System Events"
 	set lis to every login item
 	if (count of lis) is 0 then return ""
@@ -20,7 +36,7 @@ tell application "System Events"
 	repeat with li in lis
 		set p to path of li
 		if p is missing value then set p to "-"
-		set acc to acc & (name of li) & (ASCII character 9) & p & linefeed
+		set acc to acc & (my scrub(name of li)) & (ASCII character 9) & (my scrub(p)) & linefeed
 	end repeat
 	return acc
 end tell
@@ -29,20 +45,18 @@ EOF
 
 if [ -z "$collect" ]; then
 	echo "login items: none found (or Automation permission missing — check System Settings > Privacy > Automation)"
-	exit 0
-fi
-
-# merge prior saved records with the current snapshot; abort if the existing
-# backup cannot be read so nothing is discarded silently
-old=""
-if [ -f "$STATE/login-items.tsv" ]; then
-	old=$(cat "$STATE/login-items.tsv") || { echo "backup read failed — login items left untouched" >&2; exit 1; }
-fi
-tmp="$STATE/login-items.tsv.tmp$TMP_SUFFIX"
-{
-	[ -n "$old" ] && printf '%s\n' "$old"
-	printf '%s\n' "$collect"
-} | awk -F'\t' '!seen[$0]++' > "$tmp"
+else
+	# merge prior saved records with the current snapshot; abort if the existing
+	# backup cannot be read so nothing is discarded silently
+	old=""
+	if [ -f "$STATE/login-items.tsv" ]; then
+		old=$(cat "$STATE/login-items.tsv") || { echo "backup read failed — login items left untouched" >&2; exit 1; }
+	fi
+	tmp="$STATE/login-items.tsv.tmp$TMP_SUFFIX"
+	{
+		[ -n "$old" ] && printf '%s\n' "$old"
+		printf '%s\n' "$collect"
+	} | awk -F'\t' '!seen[$0]++' > "$tmp"
 if [ ! -s "$tmp" ]; then
 	echo "backup merge failed — login items left untouched" >&2
 	rm -f "$tmp"
@@ -90,6 +104,7 @@ rm -f "$collect_tmp"
 echo "login items: removed $deleted, failed $failed (backup at $STATE/login-items.tsv)"
 [ $failed -eq 0 ] || echo "warning: $failed login item(s) could not be removed — they remain enabled" >&2
 [ $pathless -eq 0 ] || echo "note: $pathless login item(s) without a path were left enabled (cannot be restored)" >&2
+fi
 
 # 2) launch agents that run at login: save labels, stop now, disable persistently
 : > "$STATE/launch-agents.txt"

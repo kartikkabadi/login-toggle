@@ -42,6 +42,22 @@ func runAppleScript(_ source: String, _ args: [String] = []) -> String {
 }
 
 private let enumerateScript = """
+on scrub(t)
+	set AppleScript's text item delimiters to tab
+	set parts to text items of t
+	set AppleScript's text item delimiters to " "
+	set t to parts as text
+	set AppleScript's text item delimiters to return
+	set parts to text items of t
+	set AppleScript's text item delimiters to " "
+	set t to parts as text
+	set AppleScript's text item delimiters to linefeed
+	set parts to text items of t
+	set AppleScript's text item delimiters to " "
+	set t to parts as text
+	return t
+end scrub
+
 tell application "System Events"
 	set lis to every login item
 	if (count of lis) is 0 then return ""
@@ -49,7 +65,7 @@ tell application "System Events"
 	repeat with li in lis
 		set p to path of li
 		if p is missing value then set p to "-"
-		set acc to acc & (name of li) & (ASCII character 9) & p & linefeed
+		set acc to acc & (my scrub(name of li)) & (ASCII character 9) & (my scrub(p)) & linefeed
 	end repeat
 	return acc
 end tell

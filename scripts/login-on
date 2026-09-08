@@ -58,7 +58,12 @@ on run argv
 end run
 EOF
 )
-		if [ "${exists:-0}" -ge 1 ] 2>/dev/null; then
+		probe_rc=$?
+		if [ $probe_rc -ne 0 ] || [ -z "$exists" ]; then
+			u=$((u+1))
+			continue
+		fi
+		if [ "$exists" -ge 1 ] 2>/dev/null; then
 			n=$((n+1))
 			continue
 		fi
