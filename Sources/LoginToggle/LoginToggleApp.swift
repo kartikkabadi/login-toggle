@@ -1,5 +1,6 @@
 import SwiftUI
 import Darwin
+import LoginToggleCore
 
 private let HOME = FileManager.default.homeDirectoryForCurrentUser.path
 private let OFF = HOME + "/.local/bin/login-off"
@@ -18,6 +19,39 @@ func runCmd(_ launchPath: String, _ args: [String]) -> String {
     return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
 }
 
+// Runs an AppleScript source via `osascript -`, passing args through to the
+// run handler. Paths and names travel as argv, never interpolated into the
+// script source.
+func runAppleScript(_ source: String, _ args: [String] = []) -> String {
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+    p.arguments = ["-"] + args
+    let inPipe = Pipe()
+    inPipe.fileHandleForWriting.write(source.data(using: .utf8)!)
+    inPipe.fileHandleForWriting.closeFile()
+    p.standardInput = inPipe
+    let outPipe = Pipe()
+    p.standardOutput = outPipe
+    p.standardError = outPipe
+    do { try p.run() } catch { return "" }
+    p.waitUntilExit()
+    return String(data: outPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+}
+
+private let enumerateScript = """
+tell application "System Events"
+	set lis to every login item
+	if (count of lis) is 0 then return ""
+	set acc to ""
+	repeat with li in lis
+		set p to path of li
+		if p is missing value then set p to "-"
+		set acc to acc & (name of li) & (ASCII character 9) & p & linefeed
+	end repeat
+	return acc
+end tell
+"""
+
 struct Row: Identifiable {
     let id: String
     let name: String
@@ -25,14 +59,6 @@ struct Row: Identifiable {
     let isAgent: Bool
     let on: Bool
     let canEnable: Bool
-}
-
-// Name visibility predicate shared by the menu's live and saved item lists.
-// Rejects empty, whitespace-only, and Unicode format/control-only names (any Cf/Cc
-// scalar, not just a hardcoded list); keeps emoji and punctuation.
-func hasVisibleName(_ s: String) -> Bool {
-    let skip = CharacterSet.whitespacesAndNewlines.union(.controlCharacters)
-    return s.unicodeScalars.contains { !skip.contains($0) }
 }
 
 final class Model: ObservableObject {
@@ -68,18 +94,19 @@ final class Model: ObservableObject {
 
     func refresh() {
         var rows: [Row] = []
-        let names = runCmd("/usr/bin/osascript", ["-e", "tell application \"System Events\" to get name of every login item"])
-        let paths = runCmd("/usr/bin/osascript", ["-e", "tell application \"System Events\" to get path of every login item"])
-        let ns = names.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-        let ps = paths.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-        for (i, n) in ns.enumerated() where n != "missing value" && hasVisibleName(n) {
-            var p = i < ps.count ? ps[i] : ""
-            if p == "missing value" { p = "-" }
-            rows.append(Row(id: "li-\(i)-\(n)", name: n, detail: p == "-" ? "" : p, isAgent: false, on: true, canEnable: true))
+        let tsv = runAppleScript(enumerateScript)
+        var liveNames: Set<String> = []
+        for line in tsv.split(separator: "\n") {
+            let parts = line.split(separator: "\t", omittingEmptySubsequences: false)
+            guard parts.count == 2 else { continue }
+            let n = String(parts[0])
+            let p = String(parts[1]) == "missing value" ? "-" : String(parts[1])
+            guard n != "missing value", hasVisibleName(n) else { continue }
+            liveNames.insert(n)
+            rows.append(Row(id: "li-\(p)", name: n, detail: p == "-" ? "" : p, isAgent: false, on: true, canEnable: true))
         }
-        let liveNames = Set(ns)
         for (n, p) in savedItems where !liveNames.contains(n) && n != "missing value" && hasVisibleName(n) {
-            rows.append(Row(id: "off-\(n)", name: n, detail: (p == "-" || p.isEmpty) ? "" : p, isAgent: false, on: false, canEnable: p != "-" && !p.isEmpty))
+            rows.append(Row(id: "off-\(n)-\(p)", name: n, detail: (p == "-" || p.isEmpty) ? "" : p, isAgent: false, on: false, canEnable: p != "-" && !p.isEmpty))
         }
         loginRows = rows
 
@@ -123,30 +150,27 @@ final class Model: ObservableObject {
             } else if row.on {
                 self.saveItem(row.name, row.detail.isEmpty ? "-" : row.detail)
                 if row.detail.isEmpty {
-                    _ = runCmd("/usr/bin/osascript", [
-                        "-e", "on run argv",
-                        "-e", "set n to item 1 of argv",
-                        "-e", "tell application \"System Events\" to delete (every login item whose name is n)",
-                        "-e", "end run",
-                        row.name
-                    ])
+                    _ = runAppleScript("""
+                        on run argv
+                        set n to item 1 of argv
+                        tell application "System Events" to delete (every login item whose name is n)
+                        end run
+                        """, [row.name])
                 } else {
-                    _ = runCmd("/usr/bin/osascript", [
-                        "-e", "on run argv",
-                        "-e", "set p to item 1 of argv",
-                        "-e", "tell application \"System Events\" to delete (every login item whose path is p)",
-                        "-e", "end run",
-                        row.detail
-                    ])
+                    _ = runAppleScript("""
+                        on run argv
+                        set p to item 1 of argv
+                        tell application "System Events" to delete (every login item whose path is p)
+                        end run
+                        """, [row.detail])
                 }
             } else if row.canEnable {
-                _ = runCmd("/usr/bin/osascript", [
-                    "-e", "on run argv",
-                    "-e", "set p to item 1 of argv",
-                    "-e", "tell application \"System Events\" to make login item at end with properties {path:p, hidden:false}",
-                    "-e", "end run",
-                    row.detail
-                ])
+                _ = runAppleScript("""
+                    on run argv
+                    set p to item 1 of argv
+                    tell application "System Events" to make login item at end with properties {path:p, hidden:false}
+                    end run
+                    """, [row.detail])
                 self.forgetItem(row.name)
             }
             DispatchQueue.main.async {

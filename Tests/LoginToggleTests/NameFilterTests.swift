@@ -1,5 +1,5 @@
 import XCTest
-@testable import LoginToggle
+@testable import LoginToggleCore
 
 final class NameFilterTests: XCTestCase {
     func testVisibleNamesAreKept() {
