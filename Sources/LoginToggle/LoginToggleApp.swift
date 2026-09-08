@@ -64,13 +64,13 @@ final class Model: ObservableObject {
         let paths = runCmd("/usr/bin/osascript", ["-e", "tell application \"System Events\" to get path of every login item"])
         let ns = names.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
         let ps = paths.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-        for (i, n) in ns.enumerated() where !n.isEmpty {
+        for (i, n) in ns.enumerated() where !n.isEmpty && n != "missing value" && n.contains(where: { $0.isLetter || $0.isNumber }) {
             var p = i < ps.count ? ps[i] : ""
             if p == "missing value" { p = "-" }
             rows.append(Row(id: "li-\(i)-\(n)", name: n, detail: p == "-" ? "" : p, isAgent: false, on: true, canEnable: true))
         }
         let liveNames = Set(ns)
-        for (n, p) in savedItems where !liveNames.contains(n) {
+        for (n, p) in savedItems where !liveNames.contains(n) && n.contains(where: { $0.isLetter || $0.isNumber }) {
             rows.append(Row(id: "off-\(n)", name: n, detail: (p == "-" || p.isEmpty) ? "" : p, isAgent: false, on: false, canEnable: p != "-" && !p.isEmpty))
         }
         loginRows = rows
@@ -225,6 +225,7 @@ struct ContentView: View {
         }
         .padding(14)
         .frame(width: 420, alignment: .leading)
+        .environment(\.colorScheme, .light)
         .onAppear { m.refresh() }
     }
 }
@@ -232,6 +233,9 @@ struct ContentView: View {
 @main
 struct LoginToggleApp: App {
     @StateObject var m = Model()
+    init() {
+        NSApplication.shared.appearance = NSAppearance(named: .aqua)
+    }
     var body: some Scene {
         MenuBarExtra("LoginToggle", systemImage: "power") {
             ContentView(m: m)
