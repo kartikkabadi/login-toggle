@@ -1,5 +1,7 @@
 #!/bin/bash
 # login-on — undo login-off: restore login items and re-enable launch agents.
+# Skips items that are already live (safe to re-run). Keeps the backup if
+# anything fails to restore, so a rerun can finish the job.
 set -u
 
 STATE="$HOME/.local/state/login-toggle"
@@ -7,24 +9,40 @@ U=$(id -u)
 
 if [ -f "$STATE/launch-agents.txt" ]; then
 	n=0
+	f=0
 	while IFS= read -r label; do
 		[ -z "$label" ] && continue
-		launchctl enable "gui/$U/$label" 2>/dev/null && n=$((n+1))
+		launchctl enable "gui/$U/$label" 2>/dev/null && n=$((n+1)) || f=$((f+1))
 		for d in "$HOME/Library/LaunchAgents" "/Library/LaunchAgents"; do
 			[ -e "$d/$label.plist" ] && launchctl bootstrap "gui/$U" "$d/$label.plist" 2>/dev/null
 		done
 	done < "$STATE/launch-agents.txt"
 	echo "launch agents re-enabled: $n (started now where possible)"
+	if [ $f -eq 0 ]; then
+		rm -f "$STATE/launch-agents.txt"
+	else
+		echo "$f agent(s) failed to re-enable — labels kept, run login-on again" >&2
+	fi
 fi
 
 if [ -f "$STATE/login-items.tsv" ]; then
+	live=$(osascript -e 'tell application "System Events" to get path of every login item' 2>/dev/null)
 	n=0
+	f=0
 	while IFS=$'\t' read -r name path; do
 		[ -z "$path" ] || [ "$path" = "-" ] && continue
 		[ -e "$path" ] || continue
-		osascript -e "tell application \"System Events\" to make login item at end with properties {path:\"$path\", hidden:false}" >/dev/null 2>&1 && n=$((n+1))
+		printf '%s\n' "$live" | tr ',' '\n' | sed 's/^ *//;s/ *$//' | grep -qxF "$path" && continue
+		if osascript -e "tell application \"System Events\" to make login item at end with properties {path:\"$path\", hidden:false}" >/dev/null 2>&1; then
+			n=$((n+1))
+		else
+			f=$((f+1))
+		fi
 	done < "$STATE/login-items.tsv"
 	echo "login items restored: $n"
+	if [ $f -eq 0 ]; then
+		rm -f "$STATE/login-items.tsv"
+	else
+		echo "$f item(s) failed to restore — backup kept, run login-on again" >&2
+	fi
 fi
-
-rm -f "$STATE/launch-agents.txt" "$STATE/login-items.tsv"

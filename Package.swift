@@ -4,5 +4,8 @@ import PackageDescription
 let package = Package(
     name: "LoginToggle",
     platforms: [.macOS(.v13)],
-    targets: [.executableTarget(name: "LoginToggle", path: "Sources/LoginToggle")]
+    targets: [
+        .executableTarget(name: "LoginToggle", path: "Sources/LoginToggle"),
+        .testTarget(name: "LoginToggleTests", dependencies: ["LoginToggle"], path: "Tests/LoginToggleTests")
+    ]
 )

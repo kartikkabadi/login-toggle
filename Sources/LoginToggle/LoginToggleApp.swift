@@ -27,6 +27,17 @@ struct Row: Identifiable {
     let canEnable: Bool
 }
 
+// Name visibility predicate shared by the menu's live and saved item lists.
+// Rejects empty, whitespace-only, and zero-width-only names; keeps emoji and punctuation.
+func hasVisibleName(_ s: String) -> Bool {
+    let invisible: Set<Unicode.Scalar> = [
+        "\u{200B}", "\u{200C}", "\u{200D}", "\u{2060}", "\u{FEFF}", "\u{200E}", "\u{200F}", "\u{00AD}", "\u{180E}"
+    ]
+    return s.unicodeScalars.contains { scalar in
+        !CharacterSet.whitespacesAndNewlines.contains(scalar) && !invisible.contains(scalar)
+    }
+}
+
 final class Model: ObservableObject {
     @Published var loginRows: [Row] = []
     @Published var agentRows: [Row] = []
@@ -64,13 +75,13 @@ final class Model: ObservableObject {
         let paths = runCmd("/usr/bin/osascript", ["-e", "tell application \"System Events\" to get path of every login item"])
         let ns = names.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
         let ps = paths.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-        for (i, n) in ns.enumerated() where !n.isEmpty && n != "missing value" && n.contains(where: { $0.isLetter || $0.isNumber }) {
+        for (i, n) in ns.enumerated() where n != "missing value" && hasVisibleName(n) {
             var p = i < ps.count ? ps[i] : ""
             if p == "missing value" { p = "-" }
             rows.append(Row(id: "li-\(i)-\(n)", name: n, detail: p == "-" ? "" : p, isAgent: false, on: true, canEnable: true))
         }
         let liveNames = Set(ns)
-        for (n, p) in savedItems where !liveNames.contains(n) && n.contains(where: { $0.isLetter || $0.isNumber }) {
+        for (n, p) in savedItems where !liveNames.contains(n) && hasVisibleName(n) {
             rows.append(Row(id: "off-\(n)", name: n, detail: (p == "-" || p.isEmpty) ? "" : p, isAgent: false, on: false, canEnable: p != "-" && !p.isEmpty))
         }
         loginRows = rows

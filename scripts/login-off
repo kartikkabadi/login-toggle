@@ -8,9 +8,10 @@ STATE="$HOME/.local/state/login-toggle"
 mkdir -p "$STATE"
 U=$(id -u)
 
-# 1) classic login items: collect name+path, save to disk, then delete.
-# AppleScript only returns data; all file I/O happens here in bash.
-data=$(osascript <<'EOF'
+# 1) classic login items: collect, persist atomically, then delete.
+# AppleScript only returns data; all file I/O happens here in bash, and the
+# backup must be on disk before anything is deleted.
+collect=$(osascript <<'EOF'
 tell application "System Events"
 	set lis to every login item
 	if (count of lis) is 0 then return ""
@@ -20,19 +21,27 @@ tell application "System Events"
 		if p is missing value then set p to "-"
 		set acc to acc & (name of li) & (ASCII character 9) & p & linefeed
 	end repeat
-	repeat with li in lis
-		delete li
-	end repeat
 	return acc
 end tell
 EOF
 ) || true
 
-if [ -n "$data" ]; then
-	printf '%s\n' "$data" > "$STATE/login-items.tsv"
-	echo "login items: removed (saved to $STATE/login-items.tsv)"
-else
+if [ -z "$collect" ]; then
 	echo "login items: none found (or Automation permission missing — check System Settings > Privacy > Automation)"
+else
+	tmp="$STATE/login-items.tsv.tmp"
+	printf '%s\n' "$collect" > "$tmp"
+	if [ -s "$tmp" ] && mv "$tmp" "$STATE/login-items.tsv"; then
+		if osascript -e 'tell application "System Events" to delete every login item' >/dev/null 2>&1; then
+			echo "login items: removed (saved to $STATE/login-items.tsv)"
+		else
+			echo "login items: partially removed — full backup kept at $STATE/login-items.tsv" >&2
+		fi
+	else
+		echo "backup write failed — login items left untouched" >&2
+		rm -f "$tmp"
+		exit 1
+	fi
 fi
 
 # 2) launch agents that run at login: save labels, stop now, disable persistently
