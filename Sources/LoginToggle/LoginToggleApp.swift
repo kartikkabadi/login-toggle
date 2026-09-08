@@ -80,6 +80,14 @@ private func pctDecode(_ s: String) -> String {
     s.removingPercentEncoding ?? s
 }
 
+// Encodes fields for the TSV protocol (matches the AppleScript enc handler).
+private func pctEncode(_ s: String) -> String {
+    s.replacingOccurrences(of: "%", with: "%25")
+        .replacingOccurrences(of: "\t", with: "%09")
+        .replacingOccurrences(of: "\r", with: "%0D")
+        .replacingOccurrences(of: "\n", with: "%0A")
+}
+
 struct Row: Identifiable {
     let id: String
     let name: String
@@ -99,16 +107,18 @@ final class Model: ObservableObject {
         return raw.split(separator: "\n").compactMap { line in
             let parts = line.split(separator: "\t", omittingEmptySubsequences: false)
             guard parts.count == 2 else { return nil }
-            return (String(parts[0]), String(parts[1]))
+            return (pctDecode(String(parts[0])), pctDecode(String(parts[1])))
         }
     }
 
     private func saveItem(_ name: String, _ path: String) {
         try? FileManager.default.createDirectory(atPath: STATE, withIntermediateDirectories: true)
         let file = STATE + "/login-items.tsv"
+        let encName = pctEncode(name)
+        let encPath = pctEncode(path)
         var existing = (try? String(contentsOfFile: file, encoding: .utf8)) ?? ""
-        if !existing.contains("\(name)\t\(path)") {
-            existing += "\(name)\t\(path)\n"
+        if !existing.contains("\(encName)\t\(encPath)") {
+            existing += "\(encName)\t\(encPath)\n"
             try? existing.write(toFile: file, atomically: true, encoding: .utf8)
         }
     }
@@ -116,7 +126,7 @@ final class Model: ObservableObject {
     private func forgetItem(_ name: String) {
         let file = STATE + "/login-items.tsv"
         guard var lines = try? String(contentsOfFile: file, encoding: .utf8).split(separator: "\n") else { return }
-        lines = lines.filter { !$0.hasPrefix("\(name)\t") }
+        lines = lines.filter { !$0.hasPrefix("\(pctEncode(name))\t") }
         try? lines.joined(separator: "\n").write(toFile: file, atomically: true, encoding: .utf8)
     }
 

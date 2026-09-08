@@ -1,11 +1,14 @@
 #!/bin/bash
 # login-on — undo login-off: restore login items and re-enable launch agents.
 # Skips items that are already live (safe to re-run). Keeps the backup if
-# anything fails to restore, so a rerun can finish the job.
+# anything fails to restore, so a rerun can finish the job. Exits nonzero
+# when any restore is incomplete.
 set -uo pipefail
 
 STATE="$HOME/.local/state/login-toggle"
 U=$(id -u)
+
+total_failed=0
 
 if [ -f "$STATE/launch-agents.txt" ]; then
 	n=0
@@ -38,6 +41,7 @@ if [ -f "$STATE/launch-agents.txt" ]; then
 		rm -f "$STATE/launch-agents.txt"
 	else
 		echo "$f agent(s) failed to re-enable — labels kept, run login-on again" >&2
+		total_failed=$((total_failed + f))
 	fi
 fi
 
@@ -48,6 +52,34 @@ if [ -f "$STATE/login-items.tsv" ]; then
 	while IFS=$'\t' read -r name path; do
 		[ -z "$path" ] || [ "$path" = "-" ] && continue
 		if [ ! -e "$path" ]; then
+			u=$((u+1))
+			continue
+		fi
+		path=$(osascript - "$path" <<'EOF' 2>/dev/null
+on run argv
+	set p to item 1 of argv
+	set AppleScript's text item delimiters to "%09"
+	set parts to text items of p
+	set AppleScript's text item delimiters to tab
+	set p to parts as text
+	set AppleScript's text item delimiters to "%0A"
+	set parts to text items of p
+	set AppleScript's text item delimiters to linefeed
+	set p to parts as text
+	set AppleScript's text item delimiters to "%0D"
+	set parts to text items of p
+	set AppleScript's text item delimiters to return
+	set p to parts as text
+	set AppleScript's text item delimiters to "%25"
+	set parts to text items of p
+	set AppleScript's text item delimiters to "%"
+	set p to parts as text
+	return p
+end run
+EOF
+)
+		probe_rc=$?
+		if [ $probe_rc -ne 0 ] || [ -z "$path" ]; then
 			u=$((u+1))
 			continue
 		fi
@@ -84,5 +116,8 @@ EOF
 		rm -f "$STATE/login-items.tsv"
 	else
 		echo "$u saved item(s) unavailable (app moved or deleted?) and $f failed — backup kept at $STATE/login-items.tsv" >&2
+		total_failed=$((total_failed + f + u))
 	fi
 fi
+
+[ $total_failed -eq 0 ] || exit 1
