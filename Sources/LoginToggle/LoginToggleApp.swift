@@ -15,13 +15,15 @@ func runCmd(_ launchPath: String, _ args: [String]) -> String {
     p.standardOutput = pipe
     p.standardError = pipe
     do { try p.run() } catch { return "" }
+    let data = pipe.fileHandleForReading.readDataToEndOfFile()
     p.waitUntilExit()
-    return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+    return String(data: data, encoding: .utf8) ?? ""
 }
 
 // Runs an AppleScript source via `osascript -`, passing args through to the
 // run handler. Paths and names travel as argv, never interpolated into the
-// script source.
+// script source. Drains the output pipe before waiting so large results
+// cannot deadlock the child.
 func runAppleScript(_ source: String, _ args: [String] = []) -> String {
     let p = Process()
     p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
@@ -34,8 +36,9 @@ func runAppleScript(_ source: String, _ args: [String] = []) -> String {
     p.standardOutput = outPipe
     p.standardError = outPipe
     do { try p.run() } catch { return "" }
+    let data = outPipe.fileHandleForReading.readDataToEndOfFile()
     p.waitUntilExit()
-    return String(data: outPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+    return String(data: data, encoding: .utf8) ?? ""
 }
 
 private let enumerateScript = """
@@ -96,17 +99,19 @@ final class Model: ObservableObject {
         var rows: [Row] = []
         let tsv = runAppleScript(enumerateScript)
         var liveNames: Set<String> = []
-        for line in tsv.split(separator: "\n") {
+        for (idx, line) in tsv.split(separator: "\n").enumerated() {
             let parts = line.split(separator: "\t", omittingEmptySubsequences: false)
             guard parts.count == 2 else { continue }
             let n = String(parts[0])
             let p = String(parts[1]) == "missing value" ? "-" : String(parts[1])
             guard n != "missing value", hasVisibleName(n) else { continue }
             liveNames.insert(n)
-            rows.append(Row(id: "li-\(p)", name: n, detail: p == "-" ? "" : p, isAgent: false, on: true, canEnable: true))
+            rows.append(Row(id: "li-\(idx)-\(p)", name: n, detail: p == "-" ? "" : p, isAgent: false, on: true, canEnable: true))
         }
-        for (n, p) in savedItems where !liveNames.contains(n) && n != "missing value" && hasVisibleName(n) {
-            rows.append(Row(id: "off-\(n)-\(p)", name: n, detail: (p == "-" || p.isEmpty) ? "" : p, isAgent: false, on: false, canEnable: p != "-" && !p.isEmpty))
+        for (idx, rec) in savedItems.enumerated() {
+            let (n, p) = rec
+            guard !liveNames.contains(n), n != "missing value", hasVisibleName(n) else { continue }
+            rows.append(Row(id: "off-\(idx)-\(n)-\(p)", name: n, detail: (p == "-" || p.isEmpty) ? "" : p, isAgent: false, on: false, canEnable: p != "-" && !p.isEmpty))
         }
         loginRows = rows
 

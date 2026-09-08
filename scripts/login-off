@@ -7,6 +7,7 @@ set -uo pipefail
 STATE="$HOME/.local/state/login-toggle"
 mkdir -p "$STATE"
 U=$(id -u)
+TMP_SUFFIX=".$$.tmp"
 
 # 1) classic login items: collect (read-only), merge into the backup, persist
 # atomically, then delete only the captured paths. AppleScript returns data and
@@ -28,43 +29,44 @@ EOF
 
 if [ -z "$collect" ]; then
 	echo "login items: none found (or Automation permission missing — check System Settings > Privacy > Automation)"
-else
-	tmp="$STATE/login-items.tsv.tmp"
-	merge_ok=yes
-	{
-		if [ -f "$STATE/login-items.tsv" ]; then
-			cat "$STATE/login-items.tsv" || merge_ok=no
-			[ "$merge_ok" = "yes" ] && [ -s "$STATE/login-items.tsv" ] && echo
-		fi
-		printf '%s\n' "$collect"
-	} | awk -F'\t' '!seen[$0]++' > "$tmp"
-	if [ "$merge_ok" = "no" ] || [ ! -s "$tmp" ]; then
-		echo "backup merge failed — login items left untouched" >&2
-		rm -f "$tmp"
-		exit 1
-	fi
-	mv "$tmp" "$STATE/login-items.tsv"
-	deleted=0
-	failed=0
-	pathless=0
-	printf '%s\n' "$collect" > "$STATE/.collect.tmp"
+	exit 0
+fi
+
+# merge prior saved records with the current snapshot; abort if the existing
+# backup cannot be read so nothing is discarded silently
+old=""
+if [ -f "$STATE/login-items.tsv" ]; then
+	old=$(cat "$STATE/login-items.tsv") || { echo "backup read failed — login items left untouched" >&2; exit 1; }
+fi
+tmp="$STATE/login-items.tsv.tmp$TMP_SUFFIX"
+{
+	[ -n "$old" ] && printf '%s\n' "$old"
+	printf '%s\n' "$collect"
+} | awk -F'\t' '!seen[$0]++' > "$tmp"
+if [ ! -s "$tmp" ]; then
+	echo "backup merge failed — login items left untouched" >&2
+	rm -f "$tmp"
+	exit 1
+fi
+if ! mv "$tmp" "$STATE/login-items.tsv"; then
+	echo "backup replace failed — login items left untouched" >&2
+	rm -f "$tmp"
+	exit 1
+fi
+
+# delete only the paths captured in this run's snapshot
+deleted=0
+failed=0
+pathless=0
+collect_tmp="$STATE/.collect.tmp$TMP_SUFFIX"
+if printf '%s\n' "$collect" > "$collect_tmp" && [ -s "$collect_tmp" ]; then
 	while IFS= read -r line; do
 		[ -z "$line" ] && continue
-		name=${line%%	*}
 		path=${line#*	}
 		[ "$path" = "$line" ] && path=""
 		if [ -z "$path" ] || [ "$path" = "-" ]; then
-			if osascript - "$name" <<'EOF' >/dev/null 2>&1
-on run argv
-	set n to item 1 of argv
-	tell application "System Events" to delete (every login item whose name is n)
-end run
-EOF
-			then
-				pathless=$((pathless+1))
-			else
-				failed=$((failed+1))
-			fi
+			# pathless: no stable identifier to target — leave in place, report
+			pathless=$((pathless+1))
 			continue
 		fi
 		if osascript - "$path" <<'EOF' >/dev/null 2>&1
@@ -78,11 +80,16 @@ EOF
 		else
 			failed=$((failed+1))
 		fi
-	done < "$STATE/.collect.tmp"
-	rm -f "$STATE/.collect.tmp"
-	echo "login items: removed $deleted, pathless removed $pathless, failed $failed (backup at $STATE/login-items.tsv)"
-	[ $failed -eq 0 ] || echo "warning: $failed login item(s) could not be removed — they remain enabled" >&2
+	done < "$collect_tmp"
+else
+	echo "deletion list write failed — login items left untouched" >&2
+	rm -f "$collect_tmp"
+	exit 1
 fi
+rm -f "$collect_tmp"
+echo "login items: removed $deleted, failed $failed (backup at $STATE/login-items.tsv)"
+[ $failed -eq 0 ] || echo "warning: $failed login item(s) could not be removed — they remain enabled" >&2
+[ $pathless -eq 0 ] || echo "note: $pathless login item(s) without a path were left enabled (cannot be restored)" >&2
 
 # 2) launch agents that run at login: save labels, stop now, disable persistently
 : > "$STATE/launch-agents.txt"

@@ -12,9 +12,11 @@ if [ -f "$STATE/launch-agents.txt" ]; then
 	f=0
 	while IFS= read -r label; do
 		[ -z "$label" ] && continue
-		launchctl enable "gui/$U/$label" 2>/dev/null
 		ok=yes
 		booted=no
+		if ! launchctl enable "gui/$U/$label" 2>/dev/null; then
+			ok=no
+		fi
 		for d in "$HOME/Library/LaunchAgents" "/Library/LaunchAgents"; do
 			[ -e "$d/$label.plist" ] || continue
 			if launchctl bootstrap "gui/$U" "$d/$label.plist" 2>/dev/null; then
