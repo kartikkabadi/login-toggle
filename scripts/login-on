@@ -1,0 +1,30 @@
+#!/bin/bash
+# login-on — undo login-off: restore login items and re-enable launch agents.
+set -u
+
+STATE="$HOME/.local/state/login-toggle"
+U=$(id -u)
+
+if [ -f "$STATE/launch-agents.txt" ]; then
+	n=0
+	while IFS= read -r label; do
+		[ -z "$label" ] && continue
+		launchctl enable "gui/$U/$label" 2>/dev/null && n=$((n+1))
+		for d in "$HOME/Library/LaunchAgents" "/Library/LaunchAgents"; do
+			[ -e "$d/$label.plist" ] && launchctl bootstrap "gui/$U" "$d/$label.plist" 2>/dev/null
+		done
+	done < "$STATE/launch-agents.txt"
+	echo "launch agents re-enabled: $n (started now where possible)"
+fi
+
+if [ -f "$STATE/login-items.tsv" ]; then
+	n=0
+	while IFS=$'\t' read -r name path; do
+		[ -z "$path" ] || [ "$path" = "-" ] && continue
+		[ -e "$path" ] || continue
+		osascript -e "tell application \"System Events\" to make login item at end with properties {path:\"$path\", hidden:false}" >/dev/null 2>&1 && n=$((n+1))
+	done < "$STATE/login-items.tsv"
+	echo "login items restored: $n"
+fi
+
+rm -f "$STATE/launch-agents.txt" "$STATE/login-items.tsv"

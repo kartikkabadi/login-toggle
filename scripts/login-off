@@ -1,0 +1,58 @@
+#!/bin/bash
+# login-off — one button to turn off every app that opens at login. Undo: login-on.
+# Covers: classic login items (System Events) + non-Apple launch agents with RunAtLoad/KeepAlive.
+# Not covered: macOS 13+ "Allow in Background" items (SMAppService) — no public API, see System Settings.
+set -u
+
+STATE="$HOME/.local/state/login-toggle"
+mkdir -p "$STATE"
+U=$(id -u)
+
+# 1) classic login items: save name+path, then delete
+osascript - "$STATE/login-items.tsv" <<'EOF'
+on run argv
+	set out to item 1 of argv
+	tell application "System Events"
+		set lis to every login item
+		if (count of lis) is 0 then return 0
+		set fd to open for access (POSIX file out) with write permission
+		set eof of fd to 0
+		repeat with li in lis
+			set p to path of li
+			if p is missing value then set p to "-"
+			write ((name of li) & (ASCII character 9) & p & linefeed) to fd
+		end repeat
+		close access fd
+		repeat with li in lis
+			delete li
+		end repeat
+	end tell
+	return 1
+end run
+EOF
+if [ $? -eq 0 ]; then
+	echo "login items: removed (saved to $STATE/login-items.tsv)"
+else
+	echo "login items: FAILED — grant your terminal Automation > System Events access, then rerun" >&2
+fi
+
+# 2) launch agents that run at login: save labels, stop now, disable persistently
+: > "$STATE/launch-agents.txt"
+n=0
+for d in "$HOME/Library/LaunchAgents" "/Library/LaunchAgents"; do
+	[ -d "$d" ] || continue
+	for plist in "$d"/*.plist; do
+		[ -e "$plist" ] || continue
+		label=$(/usr/libexec/PlistBuddy -c 'Print :Label' "$plist" 2>/dev/null) || continue
+		case "$label" in com.apple.*) continue ;; esac
+		runat=$(/usr/libexec/PlistBuddy -c 'Print :RunAtLoad' "$plist" 2>/dev/null || echo false)
+		ka=no
+		/usr/libexec/PlistBuddy -c 'Print :KeepAlive' "$plist" >/dev/null 2>&1 && ka=yes
+		[ "$runat" = "true" ] || [ "$ka" = "yes" ] || continue
+		echo "$label" >> "$STATE/launch-agents.txt"
+		launchctl bootout "gui/$U/$label" 2>/dev/null
+		launchctl disable "gui/$U/$label" 2>/dev/null && n=$((n+1))
+	done
+done
+echo "launch agents: disabled $n (labels saved to $STATE/launch-agents.txt)"
+echo "undo with: login-on"

@@ -1,0 +1,11 @@
+name: build
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - run: swift build -c release
+      - run: bash -n scripts/login-off && bash -n scripts/login-on && bash -n install.sh
