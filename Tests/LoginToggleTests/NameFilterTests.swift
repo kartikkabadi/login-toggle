@@ -18,7 +18,9 @@ final class NameFilterTests: XCTestCase {
         XCTAssertFalse(hasVisibleName("\u{200B}"))
         XCTAssertFalse(hasVisibleName("\u{200B}\u{FEFF}"))
         XCTAssertFalse(hasVisibleName("\u{2060}"))
+        XCTAssertFalse(hasVisibleName("\u{2061}"))
         XCTAssertFalse(hasVisibleName("\u{00AD}"))
+        XCTAssertFalse(hasVisibleName("\u{202E}"))
         XCTAssertFalse(hasVisibleName(" \u{200B} "))
     }
 }

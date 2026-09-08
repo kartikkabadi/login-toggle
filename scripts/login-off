@@ -30,7 +30,10 @@ if [ -z "$collect" ]; then
 	echo "login items: none found (or Automation permission missing — check System Settings > Privacy > Automation)"
 else
 	tmp="$STATE/login-items.tsv.tmp"
-	printf '%s\n' "$collect" > "$tmp"
+	{
+		[ -f "$STATE/login-items.tsv" ] && cat "$STATE/login-items.tsv"
+		printf '%s\n' "$collect"
+	} | awk -F'\t' '!seen[$0]++' > "$tmp"
 	if [ -s "$tmp" ] && mv "$tmp" "$STATE/login-items.tsv"; then
 		if osascript -e 'tell application "System Events" to delete every login item' >/dev/null 2>&1; then
 			echo "login items: removed (saved to $STATE/login-items.tsv)"

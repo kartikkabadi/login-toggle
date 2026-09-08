@@ -28,14 +28,11 @@ struct Row: Identifiable {
 }
 
 // Name visibility predicate shared by the menu's live and saved item lists.
-// Rejects empty, whitespace-only, and zero-width-only names; keeps emoji and punctuation.
+// Rejects empty, whitespace-only, and Unicode format/control-only names (any Cf/Cc
+// scalar, not just a hardcoded list); keeps emoji and punctuation.
 func hasVisibleName(_ s: String) -> Bool {
-    let invisible: Set<Unicode.Scalar> = [
-        "\u{200B}", "\u{200C}", "\u{200D}", "\u{2060}", "\u{FEFF}", "\u{200E}", "\u{200F}", "\u{00AD}", "\u{180E}"
-    ]
-    return s.unicodeScalars.contains { scalar in
-        !CharacterSet.whitespacesAndNewlines.contains(scalar) && !invisible.contains(scalar)
-    }
+    let skip = CharacterSet.whitespacesAndNewlines.union(.controlCharacters)
+    return s.unicodeScalars.contains { !skip.contains($0) }
 }
 
 final class Model: ObservableObject {

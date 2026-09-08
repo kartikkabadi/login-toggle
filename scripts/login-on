@@ -26,13 +26,20 @@ if [ -f "$STATE/launch-agents.txt" ]; then
 fi
 
 if [ -f "$STATE/login-items.tsv" ]; then
-	live=$(osascript -e 'tell application "System Events" to get path of every login item' 2>/dev/null)
 	n=0
 	f=0
+	u=0
 	while IFS=$'\t' read -r name path; do
 		[ -z "$path" ] || [ "$path" = "-" ] && continue
-		[ -e "$path" ] || continue
-		printf '%s\n' "$live" | tr ',' '\n' | sed 's/^ *//;s/ *$//' | grep -qxF "$path" && continue
+		if [ ! -e "$path" ]; then
+			u=$((u+1))
+			continue
+		fi
+		exists=$(osascript -e "tell application \"System Events\" to exists login item whose path is \"$path\"" 2>/dev/null)
+		if [ "$exists" = "true" ]; then
+			n=$((n+1))
+			continue
+		fi
 		if osascript -e "tell application \"System Events\" to make login item at end with properties {path:\"$path\", hidden:false}" >/dev/null 2>&1; then
 			n=$((n+1))
 		else
@@ -40,9 +47,9 @@ if [ -f "$STATE/login-items.tsv" ]; then
 		fi
 	done < "$STATE/login-items.tsv"
 	echo "login items restored: $n"
-	if [ $f -eq 0 ]; then
+	if [ $((f + u)) -eq 0 ]; then
 		rm -f "$STATE/login-items.tsv"
 	else
-		echo "$f item(s) failed to restore — backup kept, run login-on again" >&2
+		echo "$u saved item(s) unavailable (app moved or deleted?) and $f failed — backup kept at $STATE/login-items.tsv" >&2
 	fi
 fi
