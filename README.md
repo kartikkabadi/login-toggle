@@ -13,20 +13,28 @@ Copy the block below into Claude Code, Cursor, Codex, or any agent with shell ac
 ```text
 Install LoginToggle (https://github.com/kartikkabadi/login-toggle) on this Mac:
 
-1. git clone https://github.com/kartikkabadi/login-toggle into a temp directory, then cd into it.
-2. Run ./install.sh. It builds the app with Swift Package Manager, installs
+1. Run: curl -fsSL https://raw.githubusercontent.com/kartikkabadi/login-toggle/main/install.sh | bash
+   It clones the source, builds the app with Swift Package Manager, installs
    LoginToggle.app into ~/Applications, and installs two CLI scripts,
    login-off and login-on, into ~/.local/bin.
-3. If `swift` is not found, run `xcode-select --install` first, wait for it to finish,
-   then run ./install.sh again.
-4. Verify: `pgrep -fl LoginToggle` shows a process, and a power icon appears in the
-   menu bar (top right).
-5. When done, tell me how to use it.
+2. If `swift` or `git` is not found, run `xcode-select --install` first, wait
+   for it to finish, then run the command again.
+3. Verify: `pgrep -fl LoginToggle` shows a process, and a power icon appears in
+   the menu bar (top right).
+4. When done, tell me how to use it.
 
 Do not click "Turn all off" — just install and verify.
 ```
 
 ## Install it yourself
+
+One line (builds from source, handles everything):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kartikkabadi/login-toggle/main/install.sh | bash
+```
+
+Or clone and run it yourself:
 
 ```bash
 git clone https://github.com/kartikkabadi/login-toggle
