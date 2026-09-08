@@ -35,11 +35,14 @@ else
 		printf '%s\n' "$collect"
 	} | awk -F'\t' '!seen[$0]++' > "$tmp"
 	if [ -s "$tmp" ] && mv "$tmp" "$STATE/login-items.tsv"; then
-		if osascript -e 'tell application "System Events" to delete every login item' >/dev/null 2>&1; then
-			echo "login items: removed (saved to $STATE/login-items.tsv)"
-		else
-			echo "login items: delete failed — items left in place, backup kept at $STATE/login-items.tsv" >&2
-		fi
+		deleted=0
+		while IFS=$'\t' read -r name path; do
+			[ -z "$path" ] || [ "$path" = "-" ] && continue
+			if osascript -e "tell application \"System Events\" to delete (every login item whose path is \"$path\")" >/dev/null 2>&1; then
+				deleted=$((deleted+1))
+			fi
+		done < "$STATE/login-items.tsv"
+		echo "login items: removed $deleted (saved to $STATE/login-items.tsv)"
 	else
 		echo "backup write failed — login items left untouched" >&2
 		rm -f "$tmp"
