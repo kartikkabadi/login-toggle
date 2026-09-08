@@ -35,7 +35,7 @@ else
 		if osascript -e 'tell application "System Events" to delete every login item' >/dev/null 2>&1; then
 			echo "login items: removed (saved to $STATE/login-items.tsv)"
 		else
-			echo "login items: partially removed — full backup kept at $STATE/login-items.tsv" >&2
+			echo "login items: delete failed — items left in place, backup kept at $STATE/login-items.tsv" >&2
 		fi
 	else
 		echo "backup write failed — login items left untouched" >&2

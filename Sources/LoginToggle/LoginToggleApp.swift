@@ -81,7 +81,7 @@ final class Model: ObservableObject {
             rows.append(Row(id: "li-\(i)-\(n)", name: n, detail: p == "-" ? "" : p, isAgent: false, on: true, canEnable: true))
         }
         let liveNames = Set(ns)
-        for (n, p) in savedItems where !liveNames.contains(n) && hasVisibleName(n) {
+        for (n, p) in savedItems where !liveNames.contains(n) && n != "missing value" && hasVisibleName(n) {
             rows.append(Row(id: "off-\(n)", name: n, detail: (p == "-" || p.isEmpty) ? "" : p, isAgent: false, on: false, canEnable: p != "-" && !p.isEmpty))
         }
         loginRows = rows
