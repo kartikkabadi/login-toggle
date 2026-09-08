@@ -1,5 +1,6 @@
 import SwiftUI
 import Darwin
+import LoginToggleCore
 
 private let HOME = FileManager.default.homeDirectoryForCurrentUser.path
 private let OFF = HOME + "/.local/bin/login-off"
@@ -14,8 +15,77 @@ func runCmd(_ launchPath: String, _ args: [String]) -> String {
     p.standardOutput = pipe
     p.standardError = pipe
     do { try p.run() } catch { return "" }
+    let data = pipe.fileHandleForReading.readDataToEndOfFile()
     p.waitUntilExit()
-    return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+    return String(data: data, encoding: .utf8) ?? ""
+}
+
+// Runs an AppleScript source via `osascript -`, passing args through to the
+// run handler. Paths and names travel as argv, never interpolated into the
+// script source. Drains the output pipe before waiting so large results
+// cannot deadlock the child.
+func runAppleScript(_ source: String, _ args: [String] = []) -> String {
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+    p.arguments = ["-"] + args
+    let inPipe = Pipe()
+    inPipe.fileHandleForWriting.write(source.data(using: .utf8)!)
+    inPipe.fileHandleForWriting.closeFile()
+    p.standardInput = inPipe
+    let outPipe = Pipe()
+    p.standardOutput = outPipe
+    p.standardError = outPipe
+    do { try p.run() } catch { return "" }
+    let data = outPipe.fileHandleForReading.readDataToEndOfFile()
+    p.waitUntilExit()
+    return String(data: data, encoding: .utf8) ?? ""
+}
+
+private let enumerateScript = """
+on enc(t)
+	set AppleScript's text item delimiters to "%"
+	set parts to text items of t
+	set AppleScript's text item delimiters to "%25"
+	set t to parts as text
+	set AppleScript's text item delimiters to tab
+	set parts to text items of t
+	set AppleScript's text item delimiters to "%09"
+	set t to parts as text
+	set AppleScript's text item delimiters to return
+	set parts to text items of t
+	set AppleScript's text item delimiters to "%0D"
+	set t to parts as text
+	set AppleScript's text item delimiters to linefeed
+	set parts to text items of t
+	set AppleScript's text item delimiters to "%0A"
+	set t to parts as text
+	return t
+end enc
+
+tell application "System Events"
+	set lis to every login item
+	if (count of lis) is 0 then return ""
+	set acc to ""
+	repeat with li in lis
+		set p to path of li
+		if p is missing value then set p to "-"
+		set acc to acc & (my enc(name of li)) & (ASCII character 9) & (my enc(p)) & linefeed
+	end repeat
+	return acc
+end tell
+"""
+
+// Decodes the percent-encoding produced by the AppleScript enc handler.
+private func pctDecode(_ s: String) -> String {
+    s.removingPercentEncoding ?? s
+}
+
+// Encodes fields for the TSV protocol (matches the AppleScript enc handler).
+private func pctEncode(_ s: String) -> String {
+    s.replacingOccurrences(of: "%", with: "%25")
+        .replacingOccurrences(of: "\t", with: "%09")
+        .replacingOccurrences(of: "\r", with: "%0D")
+        .replacingOccurrences(of: "\n", with: "%0A")
 }
 
 struct Row: Identifiable {
@@ -37,16 +107,18 @@ final class Model: ObservableObject {
         return raw.split(separator: "\n").compactMap { line in
             let parts = line.split(separator: "\t", omittingEmptySubsequences: false)
             guard parts.count == 2 else { return nil }
-            return (String(parts[0]), String(parts[1]))
+            return (pctDecode(String(parts[0])), pctDecode(String(parts[1])))
         }
     }
 
     private func saveItem(_ name: String, _ path: String) {
         try? FileManager.default.createDirectory(atPath: STATE, withIntermediateDirectories: true)
         let file = STATE + "/login-items.tsv"
+        let encName = pctEncode(name)
+        let encPath = pctEncode(path)
         var existing = (try? String(contentsOfFile: file, encoding: .utf8)) ?? ""
-        if !existing.contains("\(name)\t\(path)") {
-            existing += "\(name)\t\(path)\n"
+        if !existing.contains("\(encName)\t\(encPath)") {
+            existing += "\(encName)\t\(encPath)\n"
             try? existing.write(toFile: file, atomically: true, encoding: .utf8)
         }
     }
@@ -54,24 +126,27 @@ final class Model: ObservableObject {
     private func forgetItem(_ name: String) {
         let file = STATE + "/login-items.tsv"
         guard var lines = try? String(contentsOfFile: file, encoding: .utf8).split(separator: "\n") else { return }
-        lines = lines.filter { !$0.hasPrefix("\(name)\t") }
+        lines = lines.filter { !$0.hasPrefix("\(pctEncode(name))\t") }
         try? lines.joined(separator: "\n").write(toFile: file, atomically: true, encoding: .utf8)
     }
 
     func refresh() {
         var rows: [Row] = []
-        let names = runCmd("/usr/bin/osascript", ["-e", "tell application \"System Events\" to get name of every login item"])
-        let paths = runCmd("/usr/bin/osascript", ["-e", "tell application \"System Events\" to get path of every login item"])
-        let ns = names.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-        let ps = paths.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-        for (i, n) in ns.enumerated() where !n.isEmpty {
-            var p = i < ps.count ? ps[i] : ""
-            if p == "missing value" { p = "-" }
-            rows.append(Row(id: "li-\(i)-\(n)", name: n, detail: p == "-" ? "" : p, isAgent: false, on: true, canEnable: true))
+        let tsv = runAppleScript(enumerateScript)
+        var liveNames: Set<String> = []
+        for (idx, line) in tsv.split(separator: "\n").enumerated() {
+            let parts = line.split(separator: "\t", omittingEmptySubsequences: false)
+            guard parts.count == 2 else { continue }
+            let n = pctDecode(String(parts[0]))
+            let p = pctDecode(String(parts[1]))
+            guard n != "missing value", hasVisibleName(n) else { continue }
+            liveNames.insert(n)
+            rows.append(Row(id: "li-\(idx)-\(p)", name: n, detail: p == "-" ? "" : p, isAgent: false, on: true, canEnable: true))
         }
-        let liveNames = Set(ns)
-        for (n, p) in savedItems where !liveNames.contains(n) {
-            rows.append(Row(id: "off-\(n)", name: n, detail: (p == "-" || p.isEmpty) ? "" : p, isAgent: false, on: false, canEnable: p != "-" && !p.isEmpty))
+        for (idx, rec) in savedItems.enumerated() {
+            let (n, p) = rec
+            guard !liveNames.contains(n), n != "missing value", hasVisibleName(n) else { continue }
+            rows.append(Row(id: "off-\(idx)-\(n)-\(p)", name: n, detail: (p == "-" || p.isEmpty) ? "" : p, isAgent: false, on: false, canEnable: p != "-" && !p.isEmpty))
         }
         loginRows = rows
 
@@ -114,9 +189,28 @@ final class Model: ObservableObject {
                 }
             } else if row.on {
                 self.saveItem(row.name, row.detail.isEmpty ? "-" : row.detail)
-                _ = runCmd("/usr/bin/osascript", ["-e", "tell application \"System Events\" to delete (every login item whose name is \"\(row.name)\")"])
+                if row.detail.isEmpty {
+                    _ = runAppleScript("""
+                        on run argv
+                        set n to item 1 of argv
+                        tell application "System Events" to delete (every login item whose name is n)
+                        end run
+                        """, [row.name])
+                } else {
+                    _ = runAppleScript("""
+                        on run argv
+                        set p to item 1 of argv
+                        tell application "System Events" to delete (every login item whose path is p)
+                        end run
+                        """, [row.detail])
+                }
             } else if row.canEnable {
-                _ = runCmd("/usr/bin/osascript", ["-e", "tell application \"System Events\" to make login item at end with properties {path:\"\(row.detail)\", hidden:false}"])
+                _ = runAppleScript("""
+                    on run argv
+                    set p to item 1 of argv
+                    tell application "System Events" to make login item at end with properties {path:p, hidden:false}
+                    end run
+                    """, [row.detail])
                 self.forgetItem(row.name)
             }
             DispatchQueue.main.async {
@@ -225,6 +319,7 @@ struct ContentView: View {
         }
         .padding(14)
         .frame(width: 420, alignment: .leading)
+        .environment(\.colorScheme, .light)
         .onAppear { m.refresh() }
     }
 }
@@ -232,6 +327,9 @@ struct ContentView: View {
 @main
 struct LoginToggleApp: App {
     @StateObject var m = Model()
+    init() {
+        NSApplication.shared.appearance = NSAppearance(named: .aqua)
+    }
     var body: some Scene {
         MenuBarExtra("LoginToggle", systemImage: "power") {
             ContentView(m: m)

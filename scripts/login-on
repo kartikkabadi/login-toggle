@@ -1,30 +1,123 @@
 #!/bin/bash
 # login-on — undo login-off: restore login items and re-enable launch agents.
-set -u
+# Skips items that are already live (safe to re-run). Keeps the backup if
+# anything fails to restore, so a rerun can finish the job. Exits nonzero
+# when any restore is incomplete.
+set -uo pipefail
 
 STATE="$HOME/.local/state/login-toggle"
 U=$(id -u)
 
+total_failed=0
+
 if [ -f "$STATE/launch-agents.txt" ]; then
 	n=0
+	f=0
 	while IFS= read -r label; do
 		[ -z "$label" ] && continue
-		launchctl enable "gui/$U/$label" 2>/dev/null && n=$((n+1))
+		ok=yes
+		booted=no
+		if ! launchctl enable "gui/$U/$label" 2>/dev/null; then
+			ok=no
+		fi
 		for d in "$HOME/Library/LaunchAgents" "/Library/LaunchAgents"; do
-			[ -e "$d/$label.plist" ] && launchctl bootstrap "gui/$U" "$d/$label.plist" 2>/dev/null
+			[ -e "$d/$label.plist" ] || continue
+			if launchctl bootstrap "gui/$U" "$d/$label.plist" 2>/dev/null; then
+				booted=yes
+			elif launchctl print "gui/$U/$label" >/dev/null 2>&1; then
+				booted=yes
+			else
+				ok=no
+			fi
 		done
+		if [ "$ok" = "yes" ] && [ "$booted" = "yes" ]; then
+			n=$((n+1))
+		else
+			f=$((f+1))
+		fi
 	done < "$STATE/launch-agents.txt"
 	echo "launch agents re-enabled: $n (started now where possible)"
+	if [ $f -eq 0 ]; then
+		rm -f "$STATE/launch-agents.txt"
+	else
+		echo "$f agent(s) failed to re-enable — labels kept, run login-on again" >&2
+		total_failed=$((total_failed + f))
+	fi
 fi
 
 if [ -f "$STATE/login-items.tsv" ]; then
 	n=0
+	f=0
+	u=0
 	while IFS=$'\t' read -r name path; do
 		[ -z "$path" ] || [ "$path" = "-" ] && continue
-		[ -e "$path" ] || continue
-		osascript -e "tell application \"System Events\" to make login item at end with properties {path:\"$path\", hidden:false}" >/dev/null 2>&1 && n=$((n+1))
+		if [ ! -e "$path" ]; then
+			u=$((u+1))
+			continue
+		fi
+		path=$(osascript - "$path" <<'EOF' 2>/dev/null
+on run argv
+	set p to item 1 of argv
+	set AppleScript's text item delimiters to "%09"
+	set parts to text items of p
+	set AppleScript's text item delimiters to tab
+	set p to parts as text
+	set AppleScript's text item delimiters to "%0A"
+	set parts to text items of p
+	set AppleScript's text item delimiters to linefeed
+	set p to parts as text
+	set AppleScript's text item delimiters to "%0D"
+	set parts to text items of p
+	set AppleScript's text item delimiters to return
+	set p to parts as text
+	set AppleScript's text item delimiters to "%25"
+	set parts to text items of p
+	set AppleScript's text item delimiters to "%"
+	set p to parts as text
+	return p
+end run
+EOF
+)
+		probe_rc=$?
+		if [ $probe_rc -ne 0 ] || [ -z "$path" ]; then
+			u=$((u+1))
+			continue
+		fi
+		exists=$(osascript - "$path" <<'EOF' 2>/dev/null
+on run argv
+	set p to item 1 of argv
+	tell application "System Events" to count (login items whose path is p)
+end run
+EOF
+)
+		probe_rc=$?
+		if [ $probe_rc -ne 0 ] || [ -z "$exists" ]; then
+			u=$((u+1))
+			continue
+		fi
+		if [ "$exists" -ge 1 ] 2>/dev/null; then
+			n=$((n+1))
+			continue
+		fi
+		if osascript - "$path" <<'EOF' >/dev/null 2>&1
+on run argv
+	set p to item 1 of argv
+	tell application "System Events" to make login item at end with properties {path:p, hidden:false}
+end run
+EOF
+		then
+			n=$((n+1))
+		else
+			f=$((f+1))
+		fi
 	done < "$STATE/login-items.tsv"
 	echo "login items restored: $n"
+	if [ $((f + u)) -eq 0 ]; then
+		rm -f "$STATE/login-items.tsv"
+	else
+		echo "$u saved item(s) unavailable (app moved or deleted?) and $f failed — backup kept at $STATE/login-items.tsv" >&2
+		total_failed=$((total_failed + f + u))
+	fi
 fi
 
-rm -f "$STATE/launch-agents.txt" "$STATE/login-items.tsv"
+[ $total_failed -eq 0 ] || exit 1

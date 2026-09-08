@@ -2,38 +2,132 @@
 # login-off — one button to turn off every app that opens at login. Undo: login-on.
 # Covers: classic login items (System Events) + non-Apple launch agents with RunAtLoad/KeepAlive.
 # Not covered: macOS 13+ "Allow in Background" items (SMAppService) — no public API, see System Settings.
-set -u
+set -uo pipefail
 
 STATE="$HOME/.local/state/login-toggle"
 mkdir -p "$STATE"
 U=$(id -u)
+TMP_SUFFIX=".$$.tmp"
 
-# 1) classic login items: save name+path, then delete
-osascript - "$STATE/login-items.tsv" <<'EOF'
+# 1) classic login items: collect (read-only), merge into the backup, persist
+# atomically, then delete only the captured paths. AppleScript returns data and
+# receives paths as arguments — nothing is interpolated into script source.
+collect=$(osascript <<'EOF'
+on enc(t)
+	set AppleScript's text item delimiters to "%"
+	set parts to text items of t
+	set AppleScript's text item delimiters to "%25"
+	set t to parts as text
+	set AppleScript's text item delimiters to tab
+	set parts to text items of t
+	set AppleScript's text item delimiters to "%09"
+	set t to parts as text
+	set AppleScript's text item delimiters to return
+	set parts to text items of t
+	set AppleScript's text item delimiters to "%0D"
+	set t to parts as text
+	set AppleScript's text item delimiters to linefeed
+	set parts to text items of t
+	set AppleScript's text item delimiters to "%0A"
+	set t to parts as text
+	return t
+end enc
+
+on dec(t)
+	set AppleScript's text item delimiters to "%0A"
+	set parts to text items of t
+	set AppleScript's text item delimiters to linefeed
+	set t to parts as text
+	set AppleScript's text item delimiters to "%0D"
+	set parts to text items of t
+	set AppleScript's text item delimiters to return
+	set t to parts as text
+	set AppleScript's text item delimiters to "%09"
+	set parts to text items of t
+	set AppleScript's text item delimiters to tab
+	set t to parts as text
+	set AppleScript's text item delimiters to "%25"
+	set parts to text items of t
+	set AppleScript's text item delimiters to "%"
+	set t to parts as text
+	return t
+end dec
+
+tell application "System Events"
+	set lis to every login item
+	if (count of lis) is 0 then return ""
+	set acc to ""
+	repeat with li in lis
+		set p to path of li
+		if p is missing value then set p to "-"
+		set acc to acc & (my enc(name of li)) & (ASCII character 9) & (my enc(p)) & linefeed
+	end repeat
+	return acc
+end tell
+EOF
+) || true
+
+if [ -z "$collect" ]; then
+	echo "login items: none found (or Automation permission missing — check System Settings > Privacy > Automation)"
+else
+	# merge prior saved records with the current snapshot; abort if the existing
+	# backup cannot be read so nothing is discarded silently
+	old=""
+	if [ -f "$STATE/login-items.tsv" ]; then
+		old=$(cat "$STATE/login-items.tsv") || { echo "backup read failed — login items left untouched" >&2; exit 1; }
+	fi
+	tmp="$STATE/login-items.tsv.tmp$TMP_SUFFIX"
+	{
+		[ -n "$old" ] && printf '%s\n' "$old"
+		printf '%s\n' "$collect"
+	} | awk -F'\t' '!seen[$0]++' > "$tmp"
+if [ ! -s "$tmp" ]; then
+	echo "backup merge failed — login items left untouched" >&2
+	rm -f "$tmp"
+	exit 1
+fi
+if ! mv "$tmp" "$STATE/login-items.tsv"; then
+	echo "backup replace failed — login items left untouched" >&2
+	rm -f "$tmp"
+	exit 1
+fi
+
+# delete only the paths captured in this run's snapshot
+deleted=0
+failed=0
+pathless=0
+collect_tmp="$STATE/.collect.tmp$TMP_SUFFIX"
+if printf '%s\n' "$collect" > "$collect_tmp" && [ -s "$collect_tmp" ]; then
+	while IFS= read -r line; do
+		[ -z "$line" ] && continue
+		path=${line#*	}
+		[ "$path" = "$line" ] && path=""
+		if [ -z "$path" ] || [ "$path" = "-" ]; then
+			# pathless: no stable identifier to target — leave in place, report
+			pathless=$((pathless+1))
+			continue
+		fi
+		if osascript - "$path" <<'EOF' >/dev/null 2>&1
 on run argv
-	set out to item 1 of argv
-	tell application "System Events"
-		set lis to every login item
-		if (count of lis) is 0 then return 0
-		set fd to open for access (POSIX file out) with write permission
-		set eof of fd to 0
-		repeat with li in lis
-			set p to path of li
-			if p is missing value then set p to "-"
-			write ((name of li) & (ASCII character 9) & p & linefeed) to fd
-		end repeat
-		close access fd
-		repeat with li in lis
-			delete li
-		end repeat
-	end tell
-	return 1
+	set p to item 1 of argv
+	tell application "System Events" to delete (every login item whose path is p)
 end run
 EOF
-if [ $? -eq 0 ]; then
-	echo "login items: removed (saved to $STATE/login-items.tsv)"
+		then
+			deleted=$((deleted+1))
+		else
+			failed=$((failed+1))
+		fi
+	done < "$collect_tmp"
 else
-	echo "login items: FAILED — grant your terminal Automation > System Events access, then rerun" >&2
+	echo "deletion list write failed — login items left untouched" >&2
+	rm -f "$collect_tmp"
+	exit 1
+fi
+rm -f "$collect_tmp"
+echo "login items: removed $deleted, failed $failed (backup at $STATE/login-items.tsv)"
+[ $failed -eq 0 ] || echo "warning: $failed login item(s) could not be removed — they remain enabled" >&2
+[ $pathless -eq 0 ] || echo "note: $pathless login item(s) without a path were left enabled (cannot be restored)" >&2
 fi
 
 # 2) launch agents that run at login: save labels, stop now, disable persistently
