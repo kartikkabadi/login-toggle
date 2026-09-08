@@ -46,7 +46,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 	<key>CFBundleIdentifier</key><string>com.kartikkabadi.login-toggle</string>
 	<key>CFBundleExecutable</key><string>LoginToggle</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
-	<key>CFBundleShortVersionString</key><string>1.0</string>
+	<key>CFBundleShortVersionString</key><string>0.0.1</string>
 	<key>CFBundleIconFile</key><string>AppIcon</string>
 	<key>LSUIElement</key><true/>
 	<key>NSAppleEventsUsageDescription</key><string>LoginToggle manages apps that open at login.</string>
