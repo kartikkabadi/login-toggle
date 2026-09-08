@@ -205,7 +205,7 @@ struct ContentView: View {
                 }
                 .padding(.horizontal, 2)
             }
-            .frame(maxHeight: 460)
+            .frame(height: min(CGFloat(m.loginRows.count) * 40 + CGFloat(m.agentRows.count) * 26 + 56, 460))
             Divider()
             HStack {
                 Button("Turn all off") { m.turnOff() }
